@@ -1,4 +1,7 @@
 using LinearAlgebra
+using DelimitedFiles
+using Plots
+using SmoothLivePlot
 
 """
     primitive_variables(U::Array{Float64,1})
@@ -143,21 +146,20 @@ function roe(uL::T, uR::T, fL::T, fR::T) where T <: Array{Float64,1}
     Ỹ = Roe_avg ⋅ [Yₗ, Yᵣ]
 
     # compute the average eigenvalues λᵢ
-    λ₁ = abs(ũ - ã)
-    λ₂ = abs(ũ)
+    λ₁ = abs(ũ)
+    λ₂ = abs(ũ - ã)
     λ₃ = abs(ũ + ã)
+    λ₄ = abs(ũ)
 
     # compute the coefficients αᵢ
-    Δu₁, Δu₂, Δu₃, _ = uR - uL
+    Δu₁, Δu₂, Δu₃, Δu₄ = uR - uL
 
-    α₂ = 1/2 * (λ₁ + λ₃) - λ₂
-    α₃ = 1/(2ã) * (λ₃ - λ₁)
-    α₁ = (γ-1)/ã^2 * α₂
-    α₅ = 1/2 * ũ^2 * Δu₁ - ũ*Δu₂ + Δu₃
-    α₆ = ũ*Δu₁ - Δu₂
-    aₗ₁ = α₁*α₅ - α₃*α₆
+    α₁ = (γ-1)/ã^2 * ((H̃ - ũ^2)*Δu₁ + ũ*Δu₂ - Δu₃)
+    α₂ = 1/(2ã) * ((ũ+ã)*Δu₁ - Δu₂ - ã*α₁)
+    α₃ = Δu₁ - (α₁+α₂)
+    α₄ = Δu₄ - (α₂+α₃)*Ỹ
 
-    F[4] = 1/2 * (fL[1]*Yₗ + fR[1]*Yᵣ - (λ₂*(uR[4]-uL[4]) + aₗ₁*Ỹ))
+    F[4] = 1/2 * (fL[4] + fR[4]) - 1/2 * (α₂*λ₂*Ỹ + α₃*λ₃*Ỹ + α₄*λ₄)
 
     return F
 end
@@ -216,8 +218,9 @@ end
 This function takes as input the value of the progress variable at a point `Y` and the temperature at the same point `T`. It then calculates the reaction progress rate `W(Y,T)` given by Arrhenius law.
 """
 function W(Y::Float64, T::Float64)
+    Y = clamp(Y, 0, 1)
     if T > Tc
-        return B*(1.0-Y)^ν * exp(Eₐ/(R*T))
+        return B*(1.0-Y)^ν * exp(-Eₐ/(R*T))
     else
         return 0.
     end
@@ -315,7 +318,7 @@ function CJ_detonation(ρ₀::T, p₀::T, xₛ::T, mesh::Array{T,1}) where T <: 
     pₙ = (1 + 2*γ/(γ+1) * (M^2 - 1)) * p₀
 
     U₀ = conservative_variables([ρ₀, u₀, p₀, 0.])
-    Uₙ = conservative_variables([ρₙ, uₙ, pₙ, 1.])
+    Uₙ = conservative_variables([ρₙ, uₙ, pₙ, 0.])
 
     for j in 1:N
         if mesh[j] < xₛ
@@ -336,44 +339,136 @@ function CJ_detonation(ρ₀::T, p₀::T, xₛ::T, mesh::Array{T,1}) where T <: 
     return U, Uₗ, Uᵣ
 end
 
-using Plots
+
+"""
+    function global_primitives(U::Array{Float64,1})
+
+This function takes as input the global array of conservative variables `U` and returns the global array of primitive variables `W`. The array `W` is of size `nₑ*N`, where `nₑ` is the number of primitive variables at a point and `N` is the number of solution points in the whole domain. At the iᵗʰ point, we have `W[:,i] = [ρᵢ, uᵢ, pᵢ, Yᵢ]`.
+"""
+function global_primitives(U::Array{Float64,2})
+    nₑ, N = size(U)
+    W = zeros(nₑ, N)
+
+    for i in 1:N
+        W[:,i] = primitive_variables(U[:,i])
+    end
+
+    return W
+end
+
+"""
+    function save_data(U::Array{T,2}, path::String) where T <: Float64
+
+This function writes the flow field data into a text file. It takes as input the global array of conservative variables `U` and the path to theoutput file `path`. It then calculates the global array of primitive variables `W` and writes it into the file given by `path`.
+"""
+function save_data(U::Array{T,2}, path::String) where T <: Float64
+    W = global_primitives(U)
+
+    open(path, "w") do io
+        write(io, "ρ   u   p   Y\n")
+        writedlm(io, W')
+    end
+end
+
+"""
+    function save_checkpoint(U::Array{T,2}, Uₗ::Array{T,1}, Uᵣ::Array{T,1}, path::String) where T <: Float64
+
+This function saves a snapshot of the flow field and boundary conditions at a given instant in time in order use them later for another simulation. It takes as input the global array of conservative variables `U`, the left and right boundary conditions `Uₗ` and `Uᵣ` respectively, and the path to the output file `path`. It then writes the three arrays `U`, `Uₗ` and `Uᵣ` into the file at `path`.
+"""
+function save_checkpoint(U::Array{T,2}, Uₗ::Array{T,1}, Uᵣ::Array{T,1}, path::String) where T <: Float64
+    open(path, "w") do io
+        writedlm(io, [U, Uₗ, Uᵣ])
+        # writedlm(io, U)
+    end
+end
+
+"""
+    function load_checkpoint(path::String)
+
+This function loads the flow field data and boundary conditions from a file that was written by `save_checkpoint`. The function takes as input the path to the file `path`. It then reads the file and outputs the three arrays `U`, `Uₗ` and `Uᵣ` that can be used to launch a new simulation.
+"""
+function load_checkpoint(path::String)
+    io = open(path, "r")
+    S = split(readline(io))
+    Sₗ = split(readline(io))
+    Sᵣ = split(readline(io))
+    close(io)
+
+    nₑ = length(Sₗ)
+    L = length(S)
+    U = zeros(L)
+    Uₗ = zeros(nₑ)
+    Uᵣ = zeros(nₑ)
+
+    for i in 1:L
+        U[i] = parse(Float64, S[i])
+    end
+
+    for i in 1:nₑ
+        Uₗ[i] = parse(Float64, Sₗ[i])
+        Uᵣ[i] = parse(Float64, Sᵣ[i])
+    end
+
+    U = reshape(U, (nₑ, L÷nₑ))
+
+    return U, Uₗ, Uᵣ
+end
+
+"""
+    function plot_field(mesh::Array{Float64,1}, Wₚ::Array{Float64,2}, n::Integer)
+
+This function is a wrapper for the `plot` function of the package `Plots` made to allow the live update of plots. It takes as input the `mesh` array, the global array of primitive variables `Wₚ` (can also be used with `U`), and the number of the field that we want to plot `n`. The field numbers in `Wₚ` are the following:
+
+* 1: density `ρ`
+* 2: velocity `u`
+* 3: pressure `p`
+* 4: progress variable `Y`
+"""
+function plot_field(mesh::Array{Float64,1}, Wₚ::Array{Float64,2}, n::Integer)
+    plot(mesh, Wₚ[n, :], legend=false, xlims=(x₀,x₁), ylims=(0,40))
+end
 
 # simulation parameters
 nₑ = 4 # number of equations
-Δt = 0.000005 # time step
+Δt = 0.0002 # time step
 Nₜ = 20000 # number of time iterations
-Nₚ = 200 # number of iterations per plot
+Nₚ = 100 # number of iterations per plot
 
 # generate mesh
 x₀ = 0.0
-x₁ = 0.05
-N = 1000
+x₁ = 1.0
+N = 600
 mesh, h = regular_mesh(x₀, x₁, N)
 
 # flow parameters
-Eₐ = 10.0
-B = 100.0
-R = 8.314
-qₘ = 6.0
+Eₐ = 36.0
+B = 10000.0
+R = 28.8
+qₘ = 17.5
 ν = 1
 
 γ = 1.4
 ρ₀ = 1.0
 p₀ = 1.0
 T₀ = p₀/(ρ₀*R)
-Tc = 1.1T₀
-xₛ = 0.04
+Tc = 2.0T₀
+xₛ = 0.85
 
 # set the initial state and boundary conditions
 U, Uₗ, Uᵣ = CJ_detonation(ρ₀, p₀, xₛ, mesh)
 
+# generate liveplot object
+Wₚ = global_primitives(U)
+outPlotObject = @makeLivePlot plot_field(mesh, Wₚ, 3)
+
 # time marching
 for i in 1:Nₜ
-    global U, Uₗ, Uᵣ, Δt, h
+    global U, Uₗ, Uᵣ, Δt, h, Wₚ
     U = RK2(U, Uₗ, Uᵣ, Δt, h)
     println("iteration ", i)
 
     if i%Nₚ == 0
-        plot(mesh, U[1, :], legend=false, xlims=(x₀,x₁), ylims=(0,4.5)) |> display
+        Wₚ = global_primitives(U)
+        modifyPlotObject!(outPlotObject, arg2 = Wₚ)
     end
 end
