@@ -67,68 +67,11 @@ end
 
 Roe's approximate Riemann solver. This function takes as input the solution and flux vectors at the left and right states, then computes an intermediate flux between two consecutive cells using Roe's approximate method.
 
-Source: https://github.com/surajp92/CFD_Julia
+No entropy fix is included yet.
+
+Ref: Toro, E. F. (2013). Riemann solvers and numerical methods for fluid dynamics: a practical introduction. Springer Science & Business Media.
 """
 function roe(uL::T, uR::T, fL::T, fR::T) where T <: Array{Float64,1}
-    dd = Array{Float64}(undef,3)
-    dF = Array{Float64}(undef,3)
-    V = Array{Float64}(undef,3)
-    gm = γ-1.0
-
-    #Left and right states:
-    rhLL = uL[1]
-    uuLL = uL[2]/rhLL
-    eeLL = uL[3]/rhLL
-    ppLL = gm*(eeLL*rhLL - 0.5*rhLL*(uuLL*uuLL))
-    hhLL = eeLL + ppLL/rhLL
-
-    rhRR = uR[1]
-    uuRR = uR[2]/rhRR
-    eeRR = uR[3]/rhRR
-    ppRR = gm*(eeRR*rhRR - 0.5*rhRR*(uuRR*uuRR))
-    hhRR = eeRR + ppRR/rhRR
-
-    alpha = 1.0/(sqrt(abs(rhLL)) + sqrt(abs(rhRR)))
-
-    uu = (sqrt(abs(rhLL))*uuLL + sqrt(abs(rhRR))*uuRR)*alpha
-    hh = (sqrt(abs(rhLL))*hhLL + sqrt(abs(rhRR))*hhRR)*alpha
-    aa = sqrt(abs(gm*(hh-0.5*uu*uu)))
-
-    D11 = abs(uu)
-    D22 = abs(uu + aa)
-    D33 = abs(uu - aa)
-
-    beta = 0.5/(aa*aa)
-    phi2 = 0.5*gm*uu*uu
-
-    #Right eigenvector matrix
-    R11, R21, R31 = 1.0, uu, phi2/gm
-    R12, R22, R32 = beta, beta*(uu + aa), beta*(hh + uu*aa)
-    R13, R23, R33 = beta, beta*(uu - aa), beta*(hh - uu*aa)
-
-    #Left eigenvector matrix
-    L11, L12, L13 = 1.0-phi2/(aa*aa), gm*uu/(aa*aa), -gm/(aa*aa)
-    L21, L22, L23 = phi2 - uu*aa, aa - gm*uu, gm
-    L31, L32, L33 = phi2 + uu*aa, -aa - gm*uu, gm
-
-    for m = 1:3
-        V[m] = 0.5*(uR[m]-uL[m])
-    end
-
-    dd[1] = D11*(L11*V[1] + L12*V[2] + L13*V[3])
-    dd[2] = D22*(L21*V[1] + L22*V[2] + L23*V[3])
-    dd[3] = D33*(L31*V[1] + L32*V[2] + L33*V[3])
-
-    dF[1] = R11*dd[1] + R12*dd[2] + R13*dd[3]
-    dF[2] = R21*dd[1] + R22*dd[2] + R23*dd[3]
-    dF[3] = R31*dd[1] + R32*dd[2] + R33*dd[3]
-
-    F = zeros(4)
-    for m = 1:3
-        F[m] = 0.5*(fR[m]+fL[m]) - dF[m]
-    end
-
-    ## Chemistry ##
 
     # compute primitive variables
     ρₗ, uₗ, pₗ, Yₗ = primitive_variables(uL)
@@ -159,7 +102,14 @@ function roe(uL::T, uR::T, fL::T, fR::T) where T <: Array{Float64,1}
     α₃ = Δu₁ - (α₁+α₂)
     α₄ = Δu₄ - (α₂+α₃)*Ỹ
 
-    F[4] = 1/2 * (fL[4] + fR[4]) - 1/2 * (α₂*λ₂*Ỹ + α₃*λ₃*Ỹ + α₄*λ₄)
+    # compute the right eigenvectors
+    k̃₁ = [1.0, ũ, ũ^2/2, 0.0]
+    k̃₂ = [1.0, ũ-ã, H̃ - ã*ũ, Ỹ]
+    k̃₃ = [1.0, ũ+ã, H̃ + ã*ũ, Ỹ]
+    k̃₄ = [0.0, 0.0, 0.0, 1.0]
+
+    # compute the intermediate flux vector
+    F = 1/2*(fL + fR) - 1/2*(α₁*λ₁*k̃₁ + α₂*λ₂*k̃₂ + α₃*λ₃*k̃₃ + α₄*λ₄*k̃₄)
 
     return F
 end
@@ -378,7 +328,6 @@ This function saves a snapshot of the flow field and boundary conditions at a gi
 function save_checkpoint(U::Array{T,2}, Uₗ::Array{T,1}, Uᵣ::Array{T,1}, path::String) where T <: Float64
     open(path, "w") do io
         writedlm(io, [U, Uₗ, Uᵣ])
-        # writedlm(io, U)
     end
 end
 
@@ -425,14 +374,14 @@ This function is a wrapper for the `plot` function of the package `Plots` made t
 * 4: progress variable `Y`
 """
 function plot_field(mesh::Array{Float64,1}, Wₚ::Array{Float64,2}, n::Integer)
-    plot(mesh, Wₚ[n, :], legend=false, xlims=(x₀,x₁), ylims=(0,40))
+    plot(mesh, Wₚ[n, :], legend=false, xlims=(x₀,x₁), ylims=(0,6))
 end
 
 # simulation parameters
 nₑ = 4 # number of equations
 Δt = 0.0002 # time step
-Nₜ = 20000 # number of time iterations
-Nₚ = 100 # number of iterations per plot
+Nₜ = 10000 # number of time iterations
+Nₚ = 20 # number of iterations per plot
 
 # generate mesh
 x₀ = 0.0
@@ -441,7 +390,7 @@ N = 600
 mesh, h = regular_mesh(x₀, x₁, N)
 
 # flow parameters
-Eₐ = 36.0
+Eₐ = 37.4
 B = 10000.0
 R = 28.8
 qₘ = 17.5
@@ -452,14 +401,14 @@ qₘ = 17.5
 p₀ = 1.0
 T₀ = p₀/(ρ₀*R)
 Tc = 2.0T₀
-xₛ = 0.85
+xₛ = 0.88
 
 # set the initial state and boundary conditions
 U, Uₗ, Uᵣ = CJ_detonation(ρ₀, p₀, xₛ, mesh)
 
 # generate liveplot object
 Wₚ = global_primitives(U)
-outPlotObject = @makeLivePlot plot_field(mesh, Wₚ, 3)
+outPlotObject = @makeLivePlot plot_field(mesh, Wₚ, 1)
 
 # time marching
 for i in 1:Nₜ
