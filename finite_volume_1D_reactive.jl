@@ -32,6 +32,7 @@ The calculation of `ρE` makes use of the ideal gas law.
 """
 function conservative_variables(W::Array{Float64,1})
 
+    global γ
     U::Array{Float64,1} = zeros(4)
 
     U[1] = W[1]
@@ -171,9 +172,8 @@ function W(Y::Float64, T::Float64)
     Y = clamp(Y, 0, 1)
     if T > Tc
         return B*(1.0-Y)^ν * exp(-Eₐ/(R*T))
-    else
-        return 0.
     end
+        return 0.
 end
 
 """
@@ -378,7 +378,7 @@ function plot_field(mesh::Array{Float64,1}, Wₚ::Array{Float64,2}, n::Integer)
 end
 
 # simulation parameters
-nₑ = 4 # number of equations
+const nₑ = 4 # number of equations
 Δt = 0.0002 # time step
 Nₜ = 10000 # number of time iterations
 Nₚ = 20 # number of iterations per plot
@@ -390,17 +390,17 @@ N = 600
 mesh, h = regular_mesh(x₀, x₁, N)
 
 # flow parameters
-Eₐ = 37.4
-B = 10000.0
-R = 28.8
-qₘ = 17.5
-ν = 1
+const Eₐ = 37.4
+const B = 10000.0
+const R = 28.8
+const qₘ = 17.5
+const ν = 1
 
-γ = 1.4
-ρ₀ = 1.0
-p₀ = 1.0
-T₀ = p₀/(ρ₀*R)
-Tc = 2.0T₀
+const γ = 1.4
+const ρ₀ = 1.0
+const p₀ = 1.0
+const T₀ = p₀/(ρ₀*R)
+const Tc = 2.0T₀
 xₛ = 0.88
 
 # set the initial state and boundary conditions
