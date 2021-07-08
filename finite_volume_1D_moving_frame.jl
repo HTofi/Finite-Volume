@@ -8,7 +8,7 @@ using SmoothLivePlot
 This function takes time as input and returns the relative velocity of the moving frame at the given time.
 """
 function Uᵣₑ(t::Float64)
-    return -t^2
+    return -a₀*t^2
 end
 
 """
@@ -226,76 +226,10 @@ function global_primitives(U::Array{Float64,2})
 end
 
 """
-    shock(M::T, ρ₀::T, p₀::T, xₛ::T, Δu::T, mesh::Array{T,1}) where T <: Float64
+    piston(ρ₀::T, p₀::T) where T <: Float64
 
-This function initializes the flow field for the simulation of an inert shock wave. The input arguments are the following:
-
-* the shock Mach number `M`
-* the upstream flow density and pressure `ρ₀` and `p₀` respectively
-* the shock position in the comuptational domain `xₛ`
-* the velocity of the shock in the computional domain `Δu`
-* the `mesh` vector containing the positions of all solution points
-
-The function outputs a tuple `(U, Uₗ, Uᵣ)`. `U` is the solution array of size `nₑ*N`, where `N` is the number of elements in the mesh, and the `nₑ` correponds to the number of conservative variables at each point `[ρ, ρu, ρE]`. `Uₗ` and `Uᵣ` are respectively the left and right boundary values for the solution.
-
-The initial state corresponds to a heaviside function with a jump in the flow variables at position `xₛ` given by the Rankine-Hugoniot relationships.
+This function initializes the flow as a uniform field with density and pressure given by ρ₀ and p₀, and with an initial velocity equal to zero.  This is the initial state for a flow compressed by a piston. 
 """
-function shock(M::T, ρ₀::T, p₀::T, xₛ::T, Δu::T, mesh::Array{T,1}) where T <: Float64
-
-    global nₑ, N
-    U = zeros(nₑ, N)
-
-    u₀ = M*√(γ*p₀/ρ₀)
-    ρ₁ = (γ+1)*M^2 / (2 + (γ-1)*M^2) * ρ₀
-    u₁ = ρ₀/ρ₁ * u₀
-    p₁ = (1 + 2*γ/(γ+1) * (M^2 - 1)) * p₀
-
-    U₀ = conservative_variables([ρ₀, u₀+Δu, p₀])
-    U₁ = conservative_variables([ρ₁, u₁+Δu, p₁])
-
-    for j in 1:N
-        if mesh[j] < xₛ
-            U[:, j] = U₀
-        else
-            U[:, j] = U₁
-        end
-    end
-
-    Uₗ = U₀
-    Uᵣ = U₁
-
-    return U, Uₗ, Uᵣ
-end
-
-"""
-    sod_tube(ρ₀::T, p₀::T, ρ₁::T, p₁::T, xₛ::T, mesh::Array{T,1}) where T <: Float64
-
-This function sets the initial and boundary conditions for the Sod tube problem. It takes as input the pressure and density in the two sides of the tube (`ρ₀`, `p₀` for the left side and `ρ₁`, `p₁` at the right) as well as the position of the initial split `xₛ` and the `mesh` vector containing the positions of solution nodes.
-
-The function then outputs a tuple `(U, Uₗ, Uᵣ)`. `U` is the solution array of size `nₑ*N`, where `N` is the number of elements in the mesh, and the `nₑ` correponds to the number of conservative variables at each point `[ρ, ρu, ρE]`. `Uₗ` and `Uᵣ` are respectively the left and right boundary values for the solution.
-"""
-function sod_tube(ρ₀::T, p₀::T, ρ₁::T, p₁::T, xₛ::T, mesh::Array{T,1}) where T <: Float64
-
-    global nₑ, N
-    U = zeros(nₑ, N)
-
-    U₀ = conservative_variables([ρ₀, 0.0, p₀])
-    U₁ = conservative_variables([ρ₁, 0.0, p₁])
-
-    for j in 1:N
-        if mesh[j] < xₛ
-            U[:, j] = U₀
-        else
-            U[:, j] = U₁
-        end
-    end
-
-    Uₗ = U₀
-    Uᵣ = U₁
-
-    return U, Uₗ, Uᵣ
-end
-
 function piston(ρ₀::T, p₀::T) where T <: Float64
 
     global nₑ, N
@@ -323,26 +257,27 @@ This function is a wrapper for the `plot` function of the package `Plots` made t
 * 3: pressure `p`
 """
 function plot_field(mesh::Array{Float64,1}, Wₚ::Array{Float64,2}, n::Integer)
-    plot(mesh, Wₚ[n, :], legend=false, xlims=(x₀,x₁), ylims=(0,6))
+    plot(mesh, Wₚ[n, :], legend=false, xlims=(x₀+1.5,x₁), ylims=(0,6))
 end
 
 # simulation parameters
 const nₑ = 3 # number of equations
 Δt = 0.0001 # time step
 t = 0.0 # time
-Nₜ = 15500 # number of time iterations
+Nₜ = 14000 # number of time iterations
 Nₚ = 100 # number of iterations per plot
 
 # generate mesh
 x₀ = 0.0
-x₁ = 1.0
-N = 1000
+x₁ = 2.0
+N = 2000
 mesh, h = regular_mesh(x₀, x₁, N)
 
 # flow parameters
 const γ = 1.4
 ρ₀ = 1.0
 p₀ = 1.0
+const a₀ = √(γ*p₀/ρ₀)
 M = 2.0
 xₛ = 0.5
 Δu = -0.1
@@ -350,8 +285,6 @@ xₛ = 0.5
 p₁ = 0.1
 
 # set the initial state and boundary conditions
-# U, Uₗ, Uᵣ = shock(M, ρ₀, p₀, xₛ, Δu, mesh)
-# U, Uₗ, Uᵣ = sod_tube(ρ₀, p₀, ρ₁, p₁, xₛ, mesh)
 U, Uₗ, Uᵣ = piston(ρ₀, p₀)
 
 # generate liveplot object
