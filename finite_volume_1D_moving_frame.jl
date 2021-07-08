@@ -153,9 +153,8 @@ function global_flux(U::Array{T,2}, Uₗ::Array{T,1}, Uᵣ::Array{T,1}) where T 
     end
 
     # calculate flux at boundaries
-    Uₗ = U[:,1] # inlet
     ρᵣ, uᵣ, pᵣ = primitive_variables(U[:,N])
-    Uᵣ = conservative_variables([ρᵣ, 2*Uᵣₑ(t) - uᵣ, pᵣ]) # wall
+    Uᵣ = conservative_variables([ρᵣ, 2*Uᵣₑ(t) - uᵣ, pᵣ])
     F[:,1,1] = roe(Uₗ, U[:,1], local_flux(Uₗ), F[:,1,1])
     F[:,2,N] = roe(U[:,N], Uᵣ, F[:,2,N], local_flux(Uᵣ))
 
@@ -228,7 +227,7 @@ end
 """
     piston(ρ₀::T, p₀::T) where T <: Float64
 
-This function initializes the flow as a uniform field with density and pressure given by ρ₀ and p₀, and with an initial velocity equal to zero.  This is the initial state for a flow compressed by a piston. 
+This function initializes the flow as a uniform field with density and pressure given by ρ₀ and p₀, and with an initial velocity equal to zero.  This is the initial state for a flow compressed by a piston.
 """
 function piston(ρ₀::T, p₀::T) where T <: Float64
 
@@ -257,7 +256,7 @@ This function is a wrapper for the `plot` function of the package `Plots` made t
 * 3: pressure `p`
 """
 function plot_field(mesh::Array{Float64,1}, Wₚ::Array{Float64,2}, n::Integer)
-    plot(mesh, Wₚ[n, :], legend=false, xlims=(x₀+1.5,x₁), ylims=(0,6))
+    plot(mesh, Wₚ[n, :], legend=false, xlims=(x₀,x₁), ylims=(0,6))
 end
 
 # simulation parameters
@@ -269,8 +268,8 @@ Nₚ = 100 # number of iterations per plot
 
 # generate mesh
 x₀ = 0.0
-x₁ = 2.0
-N = 2000
+x₁ = 1.0
+N = 1000
 mesh, h = regular_mesh(x₀, x₁, N)
 
 # flow parameters
@@ -278,11 +277,6 @@ const γ = 1.4
 ρ₀ = 1.0
 p₀ = 1.0
 const a₀ = √(γ*p₀/ρ₀)
-M = 2.0
-xₛ = 0.5
-Δu = -0.1
-ρ₁ = 0.125
-p₁ = 0.1
 
 # set the initial state and boundary conditions
 U, Uₗ, Uᵣ = piston(ρ₀, p₀)
